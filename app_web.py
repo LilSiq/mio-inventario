@@ -102,10 +102,16 @@ else:
         c1, c2, c3, c4 = st.columns([1, 1, 3, 2])
         
         with c1:
-            # Se c'è una foto salvata, la decodifichiamo e la mostriamo in piccolo
+            # Se c'è una foto salvata, la decodifichiamo
             if img_b64:
                 img_bytes = base64.b64decode(img_b64)
-                st.image(img_bytes, width=60)
+                
+                # 1. Mostriamo la miniatura piccola per non rompere la tabella
+                st.image(img_bytes, width=50)
+                
+                # 2. Creiamo il pulsante a comparsa per vederla in grande!
+                with st.popover("🔍 Ingrandisci"):
+                    st.image(img_bytes, use_container_width=True)
             else:
                 st.write("📷 Nessuna")
                 
