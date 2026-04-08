@@ -1,129 +1,109 @@
 import streamlit as st
-import sqlite3
+from sqlalchemy import create_engine, text
 import pandas as pd
 import base64
 
-# --- 1. IMPOSTAZIONI DELLA PAGINA WEB ---
-st.set_page_config(page_title="Il mio Inventario", page_icon="📦", layout="wide")
-st.title("📦 Il mio Inventario di Casa Web (Con Foto!)")
+# --- 1. CONNESSIONE SUPABASE (MODIFICA QUI!) ---
+# Incolla qui la stringa che hai copiato (quella col Transaction Pooler)
+# Ricordati di mettere la tua password al posto di [YOUR-PASSWORD]
+DB_URL = "postgresql://postgres.ghiozicwizhjhplheyva:[m@N-Y/AUN6xmDms]@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
 
-# --- 2. CONNESSIONE AL DATABASE ---
-conn = sqlite3.connect("inventario.db", check_same_thread=False)
-c = conn.cursor()
+engine = create_engine(DB_URL)
 
-# Ci assicuriamo che la tabella esista e abbia la colonna "immagine"
-c.execute('''
+def esegui_query(query, params=None, commit=False):
+    with engine.connect() as conn:
+        result = conn.execute(text(query), params or {})
+        if commit:
+            conn.commit()
+        return result
+
+# Creazione automatica della tabella nel Cloud
+esegui_query('''
     CREATE TABLE IF NOT EXISTS oggetti (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         nome TEXT,
         quantita TEXT,
         unita TEXT,
         immagine TEXT
     )
-''')
-conn.commit()
+''', commit=True)
 
-# --- 3. FUNZIONI DEL DATABASE ---
+# --- 2. IMPOSTAZIONI PAGINA ---
+st.set_page_config(page_title="Inventario Cloud", page_icon="📦", layout="wide")
+st.title("📦 Il mio Inventario Cloud Immortale")
+
+# --- 3. FUNZIONI ---
 def aggiorna_database():
-    c.execute("SELECT id, quantita, unita, nome, immagine FROM oggetti")
-    return c.fetchall()
+    res = esegui_query("SELECT id, quantita, unita, nome, immagine FROM oggetti ORDER BY nome ASC")
+    return res.fetchall()
 
 def elimina_oggetto(id_oggetto):
-    c.execute("DELETE FROM oggetti WHERE id=?", (id_oggetto,))
-    conn.commit()
+    esegui_query("DELETE FROM oggetti WHERE id=:id", {"id": id_oggetto}, commit=True)
     st.rerun()
 
 def modifica_quantita(id_oggetto, qta_attuale, variazione):
-    nuova_qta = qta_attuale + variazione
-    if nuova_qta < 0: nuova_qta = 0
-    c.execute("UPDATE oggetti SET quantita=? WHERE id=?", (str(nuova_qta), id_oggetto))
-    conn.commit()
+    nuova_qta = max(0, int(qta_attuale) + variazione)
+    esegui_query("UPDATE oggetti SET quantita=:qta WHERE id=:id", {"qta": str(nuova_qta), "id": id_oggetto}, commit=True)
     st.rerun()
 
-# --- 4. SEZIONE: AGGIUNGI OGGETTO ---
-with st.expander("➕ Aggiungi un nuovo oggetto all'inventario", expanded=False):
-    c.execute("SELECT DISTINCT nome FROM oggetti")
-    nomi_esistenti = [row[0] for row in c.fetchall()]
+# --- 4. SEZIONE AGGIUNGI ---
+with st.expander("➕ Aggiungi / Aggiorna Oggetto", expanded=False):
+    res_nomi = esegui_query("SELECT DISTINCT nome FROM oggetti")
+    nomi_esistenti = [row[0] for row in res_nomi.fetchall()]
     
     with st.form("form_aggiungi", clear_on_submit=True):
         col1, col2 = st.columns(2)
-        
         with col1:
-            tipo_inserimento = st.radio("Che tipo di oggetto è?", ["Nuovo (mai inserito)", "Esistente (già in lista)"])
-            
-            if tipo_inserimento == "Esistente (già in lista)" and nomi_esistenti:
-                nome = st.selectbox("Scegli dai suggerimenti:", nomi_esistenti)
+            tipo = st.radio("Tipo oggetto:", ["Nuovo", "Esistente"])
+            if tipo == "Esistente" and nomi_esistenti:
+                nome = st.selectbox("Scegli oggetto:", nomi_esistenti)
             else:
-                nome = st.text_input("Scrivi il nome del nuovo oggetto:")
-                
+                nome = st.text_input("Nome nuovo oggetto:")
         with col2:
-            quantita = st.number_input("Quantità:", min_value=0, value=1, step=1)
-            unita = st.selectbox("Unità di misura:", ["Pezzi", "Pacchi", "Scatole", "Paia", "Litri"])
+            quantita = st.number_input("Quantità:", min_value=0, value=1)
+            unita = st.selectbox("Unità:", ["Pezzi", "Pacchi", "Scatole", "Paia", "Litri"])
+            foto = st.file_uploader("Carica foto:", type=["png", "jpg", "jpeg"])
             
-            # IL NUOVO PULSANTE PER LE FOTO
-            foto_caricata = st.file_uploader("Carica una foto dell'oggetto (Opzionale)", type=["png", "jpg", "jpeg"])
-            
-        bottone_salva = st.form_submit_button("Salva nel Database")
-        
-        if bottone_salva and nome:
-            # Se l'utente ha caricato una foto, la trasformiamo in testo (Base64)
+        if st.form_submit_button("Salva nel Cloud"):
             img_b64 = ""
-            if foto_caricata is not None:
-                img_b64 = base64.b64encode(foto_caricata.read()).decode("utf-8")
-                
-            c.execute("INSERT INTO oggetti (nome, quantita, unita, immagine) VALUES (?, ?, ?, ?)", 
-                      (nome, str(quantita), unita, img_b64))
-            conn.commit()
-            st.success(f"✅ {quantita} {unita} di {nome} aggiunti con successo!")
+            if foto:
+                img_b64 = base64.b64encode(foto.read()).decode("utf-8")
+            
+            esegui_query("INSERT INTO oggetti (nome, quantita, unita, immagine) VALUES (:n, :q, :u, :i)", 
+                         {"n": nome, "q": str(quantita), "u": unita, "i": img_b64}, commit=True)
+            st.success("Dati salvati per sempre!")
             st.rerun()
 
-# --- 5. SEZIONE: LA LISTA DEGLI OGGETTI ---
-st.write("### La tua dispensa attuale:")
+# --- 5. LISTA OGGETTI ---
 oggetti = aggiorna_database()
-
 if not oggetti:
-    st.info("L'inventario è vuoto. Inizia ad aggiungere qualcosa usando il pannello qui sopra!")
+    st.info("L'inventario è vuoto.")
 else:
-    col_foto, col_qta, col_nome, col_azioni = st.columns([1, 1, 3, 2])
-    col_foto.write("**Foto**")
-    col_qta.write("**Quantità**")
-    col_nome.write("**Nome Oggetto**")
-    col_azioni.write("**Azioni**")
-    
+    c_img, c_qta, c_nome, c_azz = st.columns([1, 1, 3, 2])
+    c_img.write("**Foto**")
+    c_qta.write("**Q.tà**")
+    c_nome.write("**Nome**")
+    c_azz.write("**Azioni**")
     st.divider()
-    
-    for oggetto in oggetti:
-        id_ogg = oggetto[0]
-        qta = int(oggetto[1])
-        unita = oggetto[2]
-        nome = oggetto[3]
-        img_b64 = oggetto[4] # Questa è la foto salvata
+
+    for o in oggetti:
+        id_o, qta, uni, nom, img = o
+        col_img, col_qta, col_nom, col_btn = st.columns([1, 1, 3, 2])
         
-        c1, c2, c3, c4 = st.columns([1, 1, 3, 2])
-        
-        with c1:
-            # Se c'è una foto salvata, la decodifichiamo
-            if img_b64:
-                img_bytes = base64.b64decode(img_b64)
-                
-                # 1. Mostriamo la miniatura piccola per non rompere la tabella
-                st.image(img_bytes, width=50)
-                
-                # 2. Creiamo il pulsante a comparsa per vederla in grande!
-                with st.popover("🔍 Ingrandisci"):
-                    st.image(img_bytes, use_container_width=True)
+        with col_img:
+            if img:
+                img_b = base64.b64decode(img)
+                st.image(img_b, width=50)
+                with st.popover("🔍"):
+                    st.image(img_b, use_container_width=True)
             else:
-                st.write("📷 Nessuna")
-                
-        with c2:
-            st.write(f"**{qta}** {unita}")
-        with c3:
-            st.write(nome)
-        with c4:
+                st.write("📷 No")
+        
+        col_qta.write(f"**{qta}** {uni}")
+        col_nom.write(nom)
+        
+        with col_btn:
             b1, b2, b3 = st.columns(3)
-            if b1.button("➕", key=f"piu_{id_ogg}"):
-                modifica_quantita(id_ogg, qta, 1)
-            if b2.button("➖", key=f"meno_{id_ogg}"):
-                modifica_quantita(id_ogg, qta, -1)
-            if b3.button("🗑️", key=f"del_{id_ogg}"):
-                elimina_oggetto(id_ogg)
+            if b1.button("➕", key=f"p{id_o}"): modifica_quantita(id_o, qta, 1)
+            if b2.button("➖", key=f"m{id_o}"): modifica_quantita(id_o, qta, -1)
+            if b3.button("🗑️", key=f"d{id_o}"): elimina_oggetto(id_o)
