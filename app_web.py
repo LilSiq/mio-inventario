@@ -6,7 +6,7 @@ import base64
 # --- 1. CONNESSIONE SUPABASE (MODIFICA QUI!) ---
 # Incolla qui la stringa che hai copiato (quella col Transaction Pooler)
 # Ricordati di mettere la tua password al posto di [YOUR-PASSWORD]
-DB_URL = "postgresql://postgres.ghiozicwizhjhplheyva:[m@N-Y/AUN6xmDms]@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+DB_URL = "postgresql://postgres.ghiozicwizhjhplheyva:[Invsicuro26]@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
 
 engine = create_engine(DB_URL)
 
